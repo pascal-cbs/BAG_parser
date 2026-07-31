@@ -1,25 +1,21 @@
-import sqlite3
+import duckdb
 
 import utils
 import config
 
 
-class DatabaseSqlite:
+class DatabaseDuckdb:
     connection = None
     cursor = None
 
     def __init__(self):
-        self.connection = sqlite3.connect(config.file_db_sqlite)
+        self.connection = duckdb.connect(config.file_db)
         self.cursor = self.connection.cursor()
 
-        # Speed up database
-        # No journaling, synchronous mode off, locking mode exclusive, RAM disk for temporary tables, cache size 200MB
-        # This does not do an awful lot as saving is only 10% of the processing time. Parsing XML is 90%
-        self.connection.execute("PRAGMA journal_mode=OFF;")
-        self.connection.execute("PRAGMA synchronous=OFF;")
-        self.connection.execute("PRAGMA locking_mode=EXCLUSIVE;")
-        self.connection.execute("PRAGMA temp_store=MEMORY;")
-        self.connection.execute("PRAGMA cache_size=-200000;") # 200MB. Negative value means cache size in kilobytes
+        if hasattr(config, "duckdb_memory_limit"):
+            self.connection.execute(f"PRAGMA memory_limit='{config.duckdb_memory_limit}';")
+        if hasattr(config, "duckdb_threads"):
+            self.connection.execute(f"PRAGMA threads={config.duckdb_threads};")
 
     def close(self):
         self.connection.commit()
@@ -28,16 +24,22 @@ class DatabaseSqlite:
     def commit(self):
         self.connection.commit()
 
+    def _execute_script(self, script):
+        # DuckDB's Python API has no executescript() equivalent to sqlite3's, so we split the
+        # script into individual ';'-separated statements and run them one by one. None of the
+        # scripts in this class contain semicolons inside string literals, so a plain split is safe.
+        statements = [s.strip() for s in script.split(";") if s.strip()]
+        for statement in statements:
+            self.connection.execute(statement)
+
     def fetchmany_init(self, sql):
         self.cursor.execute(sql)
 
     def fetchone(self, sql):
-        self.cursor.execute(sql)
-        return self.cursor.fetchone()[0]
+        return self.cursor.execute(sql).fetchone()[0]
 
     def fetchall(self, sql):
-        self.cursor.execute(sql)
-        return self.cursor.fetchall()
+        return self.cursor.execute(sql).fetchall()
 
     def fetchmany(self, size=1000):
         return self.cursor.fetchmany(size)
@@ -46,9 +48,11 @@ class DatabaseSqlite:
         self.connection.execute("BEGIN TRANSACTION")
 
     def commit_transaction(self):
-        self.connection.execute("COMMIT TRANSACTION")
+        self.connection.execute("COMMIT")
 
     def vacuum(self):
+        # DuckDB supports VACUUM, though (unlike SQLite) it does not reclaim disk space the same
+        # way; it mainly recomputes table statistics. Kept for API compatibility.
         self.connection.execute("VACUUM")
 
     def save_woonplaats(self, data):
@@ -95,9 +99,9 @@ class DatabaseSqlite:
             data["naam"] = data["verkorte_naam"] if data["verkorte_naam"] != '' else data["lange_naam"]
         else:
             data["naam"] = data["lange_naam"]
-        # Note: Use REPLACE, because BAG does not always contain unique id's
+        # Note: Use INSERT OR REPLACE, because BAG does not always contain unique id's
         self.connection.execute(
-            """REPLACE INTO openbare_ruimten (id, naam, lange_naam, verkorte_naam, type, woonplaats_id, status,
+            """INSERT OR REPLACE INTO openbare_ruimten (id, naam, lange_naam, verkorte_naam, type, woonplaats_id, status,
             begindatum_geldigheid, einddatum_geldigheid)
               VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
@@ -105,9 +109,9 @@ class DatabaseSqlite:
              data["status"], data["begindatum_geldigheid"], data["einddatum_geldigheid"]))
 
     def save_nummer(self, data):
-        # Note: Use REPLACE, because BAG does not always contain unique id's
+        # Note: Use INSERT OR REPLACE, because BAG does not always contain unique id's
         self.connection.execute(
-            """REPLACE INTO nummers (id, postcode, huisnummer, huisletter, toevoeging, woonplaats_id, 
+            """INSERT OR REPLACE INTO nummers (id, postcode, huisnummer, huisletter, toevoeging, woonplaats_id, 
               openbare_ruimte_id, status, begindatum_geldigheid, einddatum_geldigheid) 
               VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
@@ -116,11 +120,10 @@ class DatabaseSqlite:
              data["einddatum_geldigheid"])
         )
 
-
     def save_pand(self, data):
-        # Note: Use REPLACE, because BAG does not always contain unique id's
+        # Note: Use INSERT OR REPLACE, because BAG does not always contain unique id's
         self.connection.execute(
-            """REPLACE INTO panden (id, bouwjaar, geometry, status, begindatum_geldigheid, einddatum_geldigheid)
+            """INSERT OR REPLACE INTO panden (id, bouwjaar, geometry, status, begindatum_geldigheid, einddatum_geldigheid)
                VALUES(?, ?, ?, ?, ?, ?)
             """,
             (data["id"], data["bouwjaar"], data["geometry"], data["status"], data["begindatum_geldigheid"],
@@ -128,9 +131,9 @@ class DatabaseSqlite:
         )
 
     def save_verblijfsobject(self, data):
-        # Note: Use REPLACE, because BAG does not always contain unique id's
+        # Note: Use INSERT OR REPLACE, because BAG does not always contain unique id's
         self.connection.execute(
-            """REPLACE INTO verblijfsobjecten (id, nummer_id, pand_id, oppervlakte, rd_x, rd_y, latitude, longitude, 
+            """INSERT OR REPLACE INTO verblijfsobjecten (id, nummer_id, pand_id, oppervlakte, rd_x, rd_y, latitude, longitude, 
             gebruiksdoel, nevenadressen, status, begindatum_geldigheid, einddatum_geldigheid) 
             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
@@ -140,9 +143,9 @@ class DatabaseSqlite:
         )
 
     def save_ligplaats(self, data):
-        # Note: Use REPLACE, because BAG does not always contain unique id's
+        # Note: Use INSERT OR REPLACE, because BAG does not always contain unique id's
         self.connection.execute(
-            """REPLACE INTO ligplaatsen (id, nummer_id, rd_x, rd_y, latitude, longitude, geometry, status,
+            """INSERT OR REPLACE INTO ligplaatsen (id, nummer_id, rd_x, rd_y, latitude, longitude, geometry, status,
                 begindatum_geldigheid, einddatum_geldigheid)
                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -151,9 +154,9 @@ class DatabaseSqlite:
         )
 
     def save_standplaats(self, data):
-        # Note: Use REPLACE, because BAG does not always contain unique id's
+        # Note: Use INSERT OR REPLACE, because BAG does not always contain unique id's
         self.connection.execute(
-            """REPLACE INTO standplaatsen (id, nummer_id, rd_x, rd_y, latitude, longitude, geometry, status,
+            """INSERT OR REPLACE INTO standplaatsen (id, nummer_id, rd_x, rd_y, latitude, longitude, geometry, status,
                 begindatum_geldigheid, einddatum_geldigheid)
                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
@@ -162,7 +165,7 @@ class DatabaseSqlite:
         )
 
     def create_bag_tables(self):
-        self.connection.executescript("""           
+        self._execute_script("""           
             DROP TABLE IF EXISTS provincies;
             CREATE TABLE provincies (
                 id INTEGER PRIMARY KEY, 
@@ -272,7 +275,7 @@ class DatabaseSqlite:
         self.connection.commit()
 
     def create_indices_bag(self):
-        self.connection.executescript("""
+        self._execute_script("""
             CREATE INDEX IF NOT EXISTS idx_verblijfsobjecten_nummer_id ON verblijfsobjecten (nummer_id);
             
             CREATE INDEX IF NOT EXISTS idx_ligplaatsen_nummer_id ON ligplaatsen (nummer_id);
@@ -283,7 +286,7 @@ class DatabaseSqlite:
 
     def create_indices_adressen(self):
         # Speed-up woonplaatsen queries
-        self.connection.executescript("""
+        self._execute_script("""
             CREATE INDEX IF NOT EXISTS idx_adressen_woonplaats_id ON adressen (woonplaats_id);
         """)
         self.connection.commit()
@@ -291,7 +294,7 @@ class DatabaseSqlite:
     def create_adressen_from_bag(self):
 
         utils.print_log('create adressen tabel: import adressen')
-        self.connection.executescript(f"""
+        self._execute_script(f"""
             DROP TABLE IF EXISTS adressen;
             
             CREATE TABLE adressen (
@@ -397,7 +400,7 @@ class DatabaseSqlite:
 
     def adressen_import_meerdere_panden(self):
 
-        self.connection.executescript("""
+        self._execute_script("""
             DROP TABLE IF EXISTS temp_pand_ids;
             
             CREATE TEMP TABLE temp_pand_ids (
@@ -418,7 +421,7 @@ class DatabaseSqlite:
 
         # Copy bouwjaar and geometry to adressen table. Only last one remains.
         # Maybe add a multi-bouwjaar and multi-geometry option later.
-        self.connection.executescript("""
+        self._execute_script("""
             UPDATE adressen SET
               geometry = p.geometry,
               bouwjaar = p.bouwjaar
@@ -436,9 +439,8 @@ class DatabaseSqlite:
 
         self.connection.commit()
 
-
     def adressen_import_ligplaatsen(self):
-        self.connection.executescript("""
+        self._execute_script("""
             UPDATE adressen SET
               rd_x = l.rd_x,
               rd_y = l.rd_y,
@@ -451,7 +453,7 @@ class DatabaseSqlite:
         """)
 
     def adressen_import_standplaatsen(self):
-        self.connection.executescript("""
+        self._execute_script("""
             UPDATE adressen SET
               rd_x = s.rd_x,
               rd_y = s.rd_y,
@@ -465,7 +467,7 @@ class DatabaseSqlite:
 
     def adressen_update_nevenadressen(self):
 
-        self.connection.executescript("""
+        self._execute_script("""
             DROP TABLE IF EXISTS nevenadressen;
             
             CREATE TEMP TABLE nevenadressen (
@@ -484,7 +486,7 @@ class DatabaseSqlite:
         self.connection.executemany(sql, parameters)
         self.connection.commit()
 
-        self.connection.executescript("""
+        self._execute_script("""
             UPDATE adressen SET
                 hoofd_nummer_id = n.hoofd_nummer_id,
                 pand_id = n.pand_id,
@@ -517,11 +519,9 @@ class DatabaseSqlite:
             WHERE n.neven_nummer_id = adressen.nummer_id;
         """)
 
-
-
     # woonplaats_id in nummers overrule woonplaats_id van de openbare ruimte.
     def adressen_update_woonplaatsen_from_nummers(self):
-        self.connection.executescript("""
+        self._execute_script("""
             UPDATE adressen SET
               woonplaats_id = n.woonplaats_id
             FROM (SELECT id, woonplaats_id FROM nummers WHERE woonplaats_id IS NOT '') AS n
@@ -530,7 +530,7 @@ class DatabaseSqlite:
         self.commit()
 
     def delete_no_longer_needed_bag_tables(self):
-        self.connection.executescript("""
+        self._execute_script("""
           DROP TABLE IF EXISTS nummers; 
           DROP TABLE IF EXISTS panden; 
           DROP TABLE IF EXISTS verblijfsobjecten; 
@@ -595,8 +595,10 @@ class DatabaseSqlite:
         self.connection.commit()
 
     def table_exists(self, table_name):
-        # Check if the database contains adressen tabel
-        count = self.fetchone(f"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '{table_name}';")
+        # Check if the database contains adressen tabel.
+        # DuckDB does not expose a sqlite_master table; use information_schema instead.
+        count = self.fetchone(
+            f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{table_name}';")
         return count == 1
 
     def test_bag_adressen(self) -> bool:
@@ -613,10 +615,10 @@ class DatabaseSqlite:
         total_error_count = 0
 
         if not self.table_exists('adressen'):
-            utils.print_log_error("SQLite database bevat geen adressen tabel. Importeer BAG eerst.")
+            utils.print_log_error("DuckDB database bevat geen adressen tabel. Importeer BAG eerst.")
             quit()
 
-        utils.print_log(f"start: tests op BAG SQLite database: '{config.file_db_sqlite}'")
+        utils.print_log(f"start: tests op BAG DuckDB database: '{config.file_db}'")
 
         sql = "SELECT nummer_begindatum_geldigheid FROM adressen ORDER BY nummer_begindatum_geldigheid DESC LIMIT 1"
         datum = self.fetchone(sql)

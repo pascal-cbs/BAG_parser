@@ -3,7 +3,7 @@
 import csv
 from statusbar import StatusUpdater
 import utils
-from database_sqlite import DatabaseSqlite
+from database_layer import DatabaseSqlite
 
 
 class Exporter:

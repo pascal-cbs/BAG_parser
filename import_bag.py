@@ -5,7 +5,7 @@ import time
 
 import utils
 import config
-from database_sqlite import DatabaseSqlite
+from database_layer import DatabaseSqlite
 from bag.bag_parser import BagParser
 from bag.gemeente_parser import GemeentenParser
 
@@ -22,7 +22,7 @@ def main():
             'CPU cores manually set in config.py. Install the psutil package to auto detect the correct amount of CPU cores.')
 
     utils.print_log(f"BAG parser version {config.version} | {config.version_date}")
-    utils.print_log(f"start: parse BAG XML '{config.file_bag}' to sqlite database '{config.file_db_sqlite}'")
+    utils.print_log(f"start: parse BAG XML '{config.file_bag}' to sqlite database '{config.file_db}'")
 
     if not os.path.exists(config.file_bag):
         sys.exit('BAG file not found. See readme.MD')
@@ -82,9 +82,9 @@ def main():
 
     db_sqlite.close()
 
-    utils.print_log(f"ready: BAG XML to SQLite database '{config.file_db_sqlite}'")
+    utils.print_log(f"ready: BAG XML to SQLite database '{config.file_db}'")
 
-    db_size_mb = os.path.getsize(config.file_db_sqlite) / (1024 * 1024)
+    db_size_mb = os.path.getsize(config.file_db) / (1024 * 1024)
     utils.print_log(f"final SQLite file size: {db_size_mb:.1f} MB")
 
     utils.print_log(f"total run time: {utils.time_elapsed(start_time)}")

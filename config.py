@@ -13,7 +13,7 @@ file_bag = 'input/bag.zip'
 file_gemeenten = 'input/gemeenten.csv'
 
 # Output SQLite database with parsed BAG
-file_db_sqlite = 'output/bag.sqlite'
+file_db = 'output/bag.sqlite'
 
 # Log-file containing progress, warnings and error messages. This info is also written to the console.
 file_log = 'output/bag_importer.log'
